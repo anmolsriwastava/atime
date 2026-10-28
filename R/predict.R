@@ -1,3 +1,17 @@
+extrapolate_N <- function(N.vec, emp.vec, ref.fun, unit.value, n.last=3){
+  o <- order(N.vec)
+  N.vec <- N.vec[o]; emp.vec <- emp.vec[o]
+  last <- tail(seq_along(N.vec), n.last)
+  # log-scale constant: robust to noise in any single point
+  log.c <- median(log(emp.vec[last]) - log(ref.fun(N.vec[last])))
+  f <- function(logN) log.c + log(ref.fun(exp(logN))) - log(unit.value)
+  lo <- log(min(N.vec)); hi <- log(max(N.vec))
+  # widen the bracket until f changes sign (ref.fun is increasing)
+  while(f(hi) < 0 && hi < 700) hi <- hi + 1
+  while(f(lo) > 0 && lo > -700) lo <- lo - 1
+  if(f(lo)*f(hi) > 0) return(NA_real_)
+  exp(uniroot(f, c(lo, hi))$root)
+}
 predict.references_best <- function(object, ...){
   . <- N <- expr.name <- unit <- empirical <- log10.empirical <-
     log10.N <- label <- NULL
@@ -37,9 +51,14 @@ predict.references_best <- function(object, ...){
       if(nrow(uniq.dt)<2){
         data.table()
       }else{
-        uniq.dt[, data.table(
-          unit.value,
-          N=10^approx(log10(empirical), log10(N), log10(unit.value))$y)]
+        uniq.dt[, {
+          N.interp <- 10^approx(log10(empirical), log10(N), log10(unit.value))$y
+          is.extrap <- is.na(N.interp)
+          N.out <- if(is.extrap){
+            extrapolate_N(N, empirical, function(x) x, unit.value)
+          }else N.interp
+          data.table(unit.value, N=N.out, extrapolated=is.extrap)
+        }]
       }
     }, by=c(object$by.vec)]
     not.NA <- pred.dt[!is.na(N)]
